@@ -1,3 +1,4 @@
+import gc
 import json
 import os
 import time
@@ -21,18 +22,22 @@ def _get_api_keys():
 
 def _prepare_ai_thumbnail(image_file):
     image_file.seek(0)
-    img = Image.open(image_file)
-    img = ImageOps.exif_transpose(img)
+    with Image.open(image_file) as raw_img:
+        img = ImageOps.exif_transpose(raw_img)
+        if img.mode in ('RGBA', 'P', 'LA'):
+            img = img.convert('RGB')
 
-    if img.mode in ('RGBA', 'P', 'LA'):
-        img = img.convert('RGB')
+        img.thumbnail((512, 512), Image.Resampling.LANCZOS)
 
-    img.thumbnail((512, 512), Image.Resampling.LANCZOS)
+        buffer = BytesIO()
+        img.save(buffer, format='JPEG', quality=70, optimize=True)
+        data = buffer.getvalue()
+        buffer.close()
+        img.close()
 
-    buffer = BytesIO()
-    img.save(buffer, format='JPEG', quality=70, optimize=True)
-    image_file.seek(0)  # Reset file pointer to 0 for subsequent AWS S3 upload
-    return buffer.getvalue()
+    image_file.seek(0)
+    gc.collect()
+    return data
 
 
 def _parse_json_response(raw_text):
@@ -92,18 +97,19 @@ Return ONLY a valid JSON object with these exact 3 keys:
 }
 """
 
+    models_to_try = ['gemini-3.5-flash', 'gemini-2.5-flash']
     max_retries = 3
     retry_delays = [2, 4]
     last_error_str = ""
 
     for attempt in range(max_retries):
-        
         key_index = attempt % len(api_keys)
+        model_name = models_to_try[min(attempt, len(models_to_try) - 1)]
         client = genai.Client(api_key=api_keys[key_index])
 
         try:
             response = client.models.generate_content(
-                model='gemini-3.5-flash',
+                model=model_name,
                 contents=[
                     types.Part.from_bytes(data=optimized_bytes, mime_type='image/jpeg'),
                     prompt
@@ -123,11 +129,11 @@ Return ONLY a valid JSON object with these exact 3 keys:
 
         except Exception as e:
             last_error_str = str(e)
-            print(f"Gemini AI Service Error (Attempt {attempt + 1}/{max_retries}): {last_error_str}")
+            print(f"Gemini AI Error ({model_name}, Attempt {attempt + 1}/{max_retries}): {last_error_str}")
 
             is_retryable = any(
                 code in last_error_str
-                for code in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED")
+                for code in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "404", "NOT_FOUND")
             )
 
             if is_retryable and attempt < max_retries - 1:
