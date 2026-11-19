@@ -20,10 +20,37 @@ def _get_api_keys():
     return keys
 
 
+def _discover_available_flash_models(client):
+    """Dynamically fetches live Flash models supported by this exact API key."""
+    discovered = []
+    try:
+        for m in client.models.list():
+            name = (getattr(m, 'name', '') or '').replace('models/', '')
+            methods = getattr(m, 'supported_generation_methods', []) or []
+            if 'flash' in name.lower() and ('generateContent' in methods or not methods):
+                # Skip audio/tts/image-only specialized variants
+                if not any(skip in name.lower() for skip in ('audio', 'tts', 'image', 'thinking', '2.5')):
+                    discovered.append(name)
+    except Exception as e:
+        print(f"Model discovery fallback triggered: {e}")
+
+    
+    preferred_order = [
+        'gemini-3-flash-preview',
+        'gemini-3.1-flash-lite-preview',
+        'gemini-3-flash',
+    ]
+    ordered = [m for m in preferred_order if m in discovered]
+    for m in discovered:
+        if m not in ordered:
+            ordered.append(m)
+
+    return ordered if ordered else ['gemini-3-flash-preview', 'gemini-3.1-flash-lite-preview']
+
+
 def _prepare_ai_thumbnail(image_file):
     image_file.seek(0)
     with Image.open(image_file) as raw_img:
-        
         try:
             raw_img.draft('RGB', (512, 512))
         except Exception:
@@ -107,18 +134,17 @@ Return ONLY a valid JSON object with these exact 3 keys:
 }
 """
 
-    models_to_try = [
-        'gemini-3-flash-preview',
-        'gemini-3.1-flash-lite-preview',
-        'gemini-2.5-flash-lite',
-    ]
-    max_retries = 3
-    retry_delays = [1, 2]
+    primary_client = genai.Client(api_key=api_keys[0])
+    models_to_try = _discover_available_flash_models(primary_client)
+    print(f"Discovered Gemini models for this key: {models_to_try}")
+
+    max_attempts = max(3, len(models_to_try))
+    retry_delays = [1, 2, 3]
     last_error_str = ""
 
-    for attempt in range(max_retries):
+    for attempt in range(max_attempts):
         key_index = attempt % len(api_keys)
-        model_name = models_to_try[min(attempt, len(models_to_try) - 1)]
+        model_name = models_to_try[attempt % len(models_to_try)]
         client = genai.Client(api_key=api_keys[key_index])
 
         try:
@@ -143,15 +169,15 @@ Return ONLY a valid JSON object with these exact 3 keys:
 
         except Exception as e:
             last_error_str = str(e)
-            print(f"Gemini AI Error ({model_name}, Attempt {attempt + 1}/{max_retries}): {last_error_str}")
+            print(f"Gemini AI Error ({model_name}, Attempt {attempt + 1}/{max_attempts}): {last_error_str}")
 
             is_retryable = any(
                 code in last_error_str
                 for code in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "404", "NOT_FOUND", "Empty response")
             )
 
-            if is_retryable and attempt < max_retries - 1:
-                time.sleep(retry_delays[attempt])
+            if is_retryable and attempt < max_attempts - 1:
+                time.sleep(retry_delays[min(attempt, len(retry_delays) - 1)])
                 continue
             break
 
