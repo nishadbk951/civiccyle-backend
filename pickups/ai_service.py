@@ -23,17 +23,25 @@ def _get_api_keys():
 def _prepare_ai_thumbnail(image_file):
     image_file.seek(0)
     with Image.open(image_file) as raw_img:
+        # Senior Pillow optimization: decode large mobile JPEGs at reduced resolution directly
+        try:
+            raw_img.draft('RGB', (512, 512))
+        except Exception:
+            pass
+
         img = ImageOps.exif_transpose(raw_img)
-        if img.mode in ('RGBA', 'P', 'LA'):
+        if img.mode != 'RGB':
             img = img.convert('RGB')
 
         img.thumbnail((512, 512), Image.Resampling.LANCZOS)
 
         buffer = BytesIO()
-        img.save(buffer, format='JPEG', quality=70, optimize=True)
+        img.save(buffer, format='JPEG', quality=72, optimize=True)
         data = buffer.getvalue()
         buffer.close()
-        img.close()
+
+        if img is not raw_img:
+            img.close()
 
     image_file.seek(0)
     gc.collect()
@@ -42,6 +50,8 @@ def _prepare_ai_thumbnail(image_file):
 
 def _parse_json_response(raw_text):
     text = (raw_text or "").strip()
+    if not text:
+        raise ValueError("Empty response from AI model")
     if text.startswith("```"):
         text = text.strip("`")
         if text.lower().startswith("json"):
@@ -65,7 +75,7 @@ def analyze_waste_image(image_file):
         return {
             "is_valid": False,
             "detected_item": "",
-            "error_message": "Invalid or corrupted image file. Please retake the photo."
+            "error_message": "Invalid or unsupported photo format. Please retake the photo."
         }
 
     prompt = """You are a strict quality-control AI for a dry-waste recycling company.
@@ -97,7 +107,7 @@ Return ONLY a valid JSON object with these exact 3 keys:
 }
 """
 
-    models_to_try = ['gemini-3.5-flash', 'gemini-2.5-flash']
+    models_to_try = ['gemini-2.5-flash', 'gemini-2.5-flash-lite']
     max_retries = 3
     retry_delays = [2, 4]
     last_error_str = ""
@@ -133,7 +143,7 @@ Return ONLY a valid JSON object with these exact 3 keys:
 
             is_retryable = any(
                 code in last_error_str
-                for code in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "404", "NOT_FOUND")
+                for code in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "Empty response")
             )
 
             if is_retryable and attempt < max_retries - 1:
@@ -150,8 +160,10 @@ Return ONLY a valid JSON object with these exact 3 keys:
         user_msg = "AI server is currently experiencing high traffic. Please wait 5 seconds and try again."
     elif "429" in last_error_str or "RESOURCE_EXHAUSTED" in last_error_str:
         user_msg = "AI request limit reached temporarily. Please wait 30 seconds and try again."
+    elif "API_KEY" in last_error_str or "403" in last_error_str:
+        user_msg = "AI API key error on server. Please check GEMINI_API_KEY in Render."
     else:
-        user_msg = "Unable to analyze the image right now. Please try again."
+        user_msg = f"AI verification failed: {last_error_str[:120]}"
 
     return {
         "is_valid": False,
