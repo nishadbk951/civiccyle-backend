@@ -8,6 +8,12 @@ from .models import User, CollectorProfile
 from .serializers import UserRegistrationSerializer, UserLoginSerializer
 
 
+
+PROTECTED_DEMO_ADMIN_PHONES = [
+    "9999999990",  
+]
+
+
 class RegisterUserView(APIView):
     permission_classes = [AllowAny]
 
@@ -34,8 +40,6 @@ class LoginUserView(APIView):
             return Response(serializer.validated_data, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
 
 
 class AdminCollectorListView(APIView):
@@ -92,6 +96,17 @@ class AdminChangePasswordView(APIView):
     permission_classes = [IsAdminUser]
 
     def post(self, request):
+        user = request.user
+
+        
+        if str(getattr(user, "phone", "")).strip() in PROTECTED_DEMO_ADMIN_PHONES:
+            return Response(
+                {
+                    "error": "Demo Mode Restriction: Password updates are restricted to the primary administrator account."
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         old_password = request.data.get("old_password", "")
         new_password = request.data.get("new_password", "")
 
@@ -101,7 +116,6 @@ class AdminChangePasswordView(APIView):
         if len(new_password) < 6:
             return Response({"error": "New password must be at least 6 characters long."}, status=status.HTTP_400_BAD_REQUEST)
 
-        user = request.user
         if not check_password(old_password, user.password):
             return Response({"error": "Current password is incorrect."}, status=status.HTTP_400_BAD_REQUEST)
 
