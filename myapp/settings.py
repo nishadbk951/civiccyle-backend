@@ -8,7 +8,7 @@ from datetime import timedelta
 from dotenv import load_dotenv
 import dj_database_url
 
-load_dotenv()  
+load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -35,7 +35,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',  
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -64,12 +64,15 @@ TEMPLATES = [
 WSGI_APPLICATION = 'myapp.wsgi.application'
 
 
-
 DATABASE_URL = os.getenv('DATABASE_URL')
 
 if DATABASE_URL:
     DATABASES = {
-        'default': dj_database_url.parse(DATABASE_URL)
+        'default': dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=600,
+            conn_health_checks=True,
+        )
     }
 else:
     DATABASES = {
@@ -106,10 +109,8 @@ USE_I18N = True
 USE_TZ = True
 
 
-
 STATIC_URL = 'static/'
-STATIC_ROOT = BASE_DIR / 'staticfiles'  
-
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 
 MAILERS = {
@@ -141,10 +142,15 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
 ]
 
+CSRF_TRUSTED_ORIGINS = [
+    "https://*.onrender.com",
+]
+
 FRONTEND_URL = os.getenv('FRONTEND_URL')
 if FRONTEND_URL:
-    CORS_ALLOWED_ORIGINS.append(FRONTEND_URL)
-
+    clean_frontend_url = FRONTEND_URL.rstrip('/')
+    CORS_ALLOWED_ORIGINS.append(clean_frontend_url)
+    CSRF_TRUSTED_ORIGINS.append(clean_frontend_url)
 
 
 AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
@@ -152,11 +158,9 @@ AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
 AWS_STORAGE_BUCKET_NAME = os.getenv('AWS_STORAGE_BUCKET_NAME')
 AWS_S3_REGION_NAME = os.getenv('AWS_S3_REGION_NAME', 'ap-south-1')
 
-
 AWS_S3_FILE_OVERWRITE = False
 AWS_DEFAULT_ACL = None
 AWS_QUERYSTRING_AUTH = False
-
 
 STORAGES = {
     "default": {
@@ -173,3 +177,4 @@ AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com'
 MEDIA_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/'
 
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+GEMINI_API_KEY_BACKUP = os.getenv('GEMINI_API_KEY_BACKUP')

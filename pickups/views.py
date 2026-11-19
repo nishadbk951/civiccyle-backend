@@ -13,7 +13,6 @@ from .serializers import WasteRequestSerializer
 from .ai_service import analyze_waste_image
 
 
-
 def normalize_waste_category(raw_name):
     if not raw_name:
         return "OTHER"
@@ -46,7 +45,13 @@ class WasteRequestCreateView(generics.CreateAPIView):
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            first_field, first_errors = next(iter(serializer.errors.items()))
+            err_msg = first_errors[0] if isinstance(first_errors, list) else str(first_errors)
+            return Response(
+                {"error": f"{first_field}: {err_msg}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         uploaded_image = request.FILES.get('image')
         if not uploaded_image:
@@ -63,8 +68,20 @@ class WasteRequestCreateView(generics.CreateAPIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        try:
+            uploaded_image.seek(0)
+        except Exception:
+            pass
+
         detected_item = normalize_waste_category(ai_result.get("detected_item", "PLASTIC"))
-        serializer.save(user=request.user, ai_detected_item=detected_item)
+
+        try:
+            serializer.save(user=request.user, ai_detected_item=detected_item)
+        except Exception as e:
+            return Response(
+                {"error": f"Storage/Database error: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
         return Response(
             {
@@ -73,6 +90,7 @@ class WasteRequestCreateView(generics.CreateAPIView):
             },
             status=status.HTTP_201_CREATED
         )
+
 
 class UserWasteRequestListView(generics.ListAPIView):
     serializer_class = WasteRequestSerializer
@@ -168,7 +186,6 @@ class RejectPickupView(APIView):
         )
 
 
-
 class CompletePickupView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -234,14 +251,12 @@ class UpdateWasteStatusView(generics.UpdateAPIView):
         )
 
 
-
 class AdminAllWasteRequestsView(generics.ListAPIView):
     serializer_class = WasteRequestSerializer
     permission_classes = [IsAdminUser]
 
     def get_queryset(self):
         return WasteRequest.objects.select_related('user', 'assigned_collector').all().order_by('-created_at')
-
 
 
 class AdminReopenRequestView(APIView):
@@ -271,12 +286,10 @@ class AdminReopenRequestView(APIView):
         )
 
 
-
 class AdminAnalyticsOverviewView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        
         citizens_qs = (
             User.objects.filter(role='USER')
             .annotate(total_requests=Count('waste_requests'))
@@ -299,11 +312,18 @@ class AdminAnalyticsOverviewView(APIView):
         total_collectors = CollectorProfile.objects.count()
         pending_collector_approvals = CollectorProfile.objects.filter(is_verified=False).count()
 
-        total_requests = WasteRequest.objects.count()
-        pending_requests = WasteRequest.objects.filter(status='PENDING').count()
-        in_progress_requests = WasteRequest.objects.filter(status='IN_PROGRESS').count()
-        completed_requests = WasteRequest.objects.filter(status='COMPLETED').count()
-        rejected_requests = WasteRequest.objects.filter(status='REJECTED').count()
+        req_stats = WasteRequest.objects.aggregate(
+            total_requests=Count('id'),
+            pending_requests=Count('id', filter=Q(status='PENDING')),
+            in_progress_requests=Count('id', filter=Q(status='IN_PROGRESS')),
+            completed_requests=Count('id', filter=Q(status='COMPLETED')),
+            rejected_requests=Count('id', filter=Q(status='REJECTED')),
+        )
+        total_requests = req_stats['total_requests']
+        pending_requests = req_stats['pending_requests']
+        in_progress_requests = req_stats['in_progress_requests']
+        completed_requests = req_stats['completed_requests']
+        rejected_requests = req_stats['rejected_requests']
 
         raw_items = (
             WasteRequest.objects.exclude(ai_detected_item__isnull=True)
