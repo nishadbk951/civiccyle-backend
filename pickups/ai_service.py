@@ -23,7 +23,7 @@ def _get_api_keys():
 def _prepare_ai_thumbnail(image_file):
     image_file.seek(0)
     with Image.open(image_file) as raw_img:
-        # Senior Pillow optimization: decode large mobile JPEGs at reduced resolution directly
+        
         try:
             raw_img.draft('RGB', (512, 512))
         except Exception:
@@ -107,9 +107,13 @@ Return ONLY a valid JSON object with these exact 3 keys:
 }
 """
 
-    models_to_try = ['gemini-2.5-flash', 'gemini-2.5-flash-lite']
+    models_to_try = [
+        'gemini-3-flash-preview',
+        'gemini-3.1-flash-lite-preview',
+        'gemini-2.5-flash-lite',
+    ]
     max_retries = 3
-    retry_delays = [2, 4]
+    retry_delays = [1, 2]
     last_error_str = ""
 
     for attempt in range(max_retries):
@@ -143,7 +147,7 @@ Return ONLY a valid JSON object with these exact 3 keys:
 
             is_retryable = any(
                 code in last_error_str
-                for code in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "Empty response")
+                for code in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "404", "NOT_FOUND", "Empty response")
             )
 
             if is_retryable and attempt < max_retries - 1:
