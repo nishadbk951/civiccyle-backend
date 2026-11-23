@@ -28,7 +28,7 @@ def _discover_available_flash_models(client):
             name = (getattr(m, 'name', '') or '').replace('models/', '')
             methods = getattr(m, 'supported_generation_methods', []) or []
             if 'flash' in name.lower() and ('generateContent' in methods or not methods):
-                # Skip audio/tts/image-only specialized variants
+                
                 if not any(skip in name.lower() for skip in ('audio', 'tts', 'image', 'thinking', '2.5')):
                     discovered.append(name)
     except Exception as e:
